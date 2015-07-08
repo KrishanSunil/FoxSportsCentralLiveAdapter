@@ -1,0 +1,264 @@
+import com.theplatform.ingest.adapter.api.AdapterException
+import com.theplatform.ingest.adapter.api.AdapterResultItem
+import com.theplatform.ingest.data.objects.IngestMedia
+import com.theplatform.ingest.data.objects.IngestMediaFile
+import java.text.SimpleDateFormat;
+import com.theplatform.data.api.objects.type.CategoryInfo
+import com.theplatform.media.api.data.objects.TransferInfo
+import com.theplatform.ingest.data.objects.IngestOptions
+import com.theplatform.ingest.data.objects.IngestMethod
+import org.codehaus.groovy.runtime.TimeCategory
+import com.theplatform.ingest.data.objects.WorkflowOption
+// The Watch Folder agent adds the name of the source metafile
+// to the map of additional parameters. You can read it in your
+// script (using the filename key), should you need to record it.
+// The path information is relative to watch folder URL.
+// The path also includes the filename.
+
+def filename = adapterSettings.getAdditionalParameterMap().get("filename")
+def filepath = adapterSettings.getAdditionalParameterMap().get("filePath")
+
+def accountID = "http://access.auth.theplatform.com/data/Account/2401906690" //Clips DP
+//def accountID = "http://access.auth.theplatform.com/data/Account/2337729561"  //prod Play
+//def accountID = "http://access.auth.theplatform.com/data/Account/2307139592" //dev Play
+
+// If the metadata has what we want, this will remain null.
+Exception ex = null
+
+def delim
+def airingVODCode = "NONLL"
+def vodCode = "VOD"
+def vodGuid
+def oldGuid
+def guidFinal
+Boolean isVideo = false
+def splitFilename
+def filenameNoExtn = ""
+def fileNameStart = "FSCWEB"
+def categories = "FOX Sports Central"
+
+
+try
+{
+	if (filename != "" && filename.endsWith("mp4") ) {
+		delim = '\\.'
+		isVideo = true
+	}else {
+		//TODO: invalid content
+	}
+	splitFilename = filename.split(delim)
+	filenameNoExtn = splitFilename[0]
+	vodGuid = filenameNoExtn;
+}
+catch(Exception e)
+{
+
+}
+
+
+
+
+
+
+
+// Create a new IngestMedia item. We'll populate
+// its fields with elements from the input XML.
+IngestMedia media = new IngestMedia()
+Boolean update = false
+
+if (mediaHelper.mediaExistsByGuid(vodGuid)) {
+	update = true
+
+}
+
+media.guid = vodGuid
+
+
+
+if (update == false){
+
+	if(filenameNoExtn.startsWith(fileNameStart)){
+		setMediaFields (media,filenameNoExtn,accountID)
+
+	}else{
+		media.title = filenameNoExtn
+		setFields(media,accountID)
+	}
+}
+
+
+//add a default country to all entries.
+List<String> list2 = new ArrayList<String>()
+
+list2.add("jp")
+
+list2.add("cn")
+
+media.countries = list2.toArray()
+media.setCustomValue(null, "allowedCountry", media.countries)
+
+media.excludeCountries = true
+
+ingestMediaFiles = []
+IngestMediaFile mediaFileSource = new IngestMediaFile()
+
+mediaFileSource.sourceUrl = filename
+mediaFileSource.isDefault = true
+
+if (isVideo) {
+	mediaFileSource.assetTypes = ["MP4-H264 (custom transcoded)"]
+}
+
+
+ingestMediaFiles << mediaFileSource
+
+// Add the media files to the media items.
+if (ingestMediaFiles.size() > 0) {
+	if (isVideo)
+		media.setContent(ingestMediaFiles.toArray(new IngestMediaFile[ingestMediaFiles.size()]))
+
+}
+
+
+def  catList = []
+
+CategoryInfo catInfo = new CategoryInfo()
+catInfo.name = categories
+catList << catInfo;
+media.categories = catList.toArray(new CategoryInfo[catList.size()])
+
+
+
+
+
+AdapterResultItem resultItem = new AdapterResultItem()
+
+if (ex != null) {
+	resultItem.setException(ex)
+} else {
+	resultItem.media = media
+}
+
+resultQueue.put(resultItem)
+
+
+
+// Set fields for Non Fox central media
+
+def setFields(ingestMediaObject,accountID){
+	ingestMediaObject.setCustomValue(null, "isLive", false);
+	ingestMediaObject.setCustomValue(null, "isFree", true);
+	
+	def mydate = new Date(System.currentTimeMillis())
+	ingestMediaObject.availableDate  = mydate
+}
+
+// set the fields for media
+
+def setMediaFields (ingestMediaObject, mediaName,accountID)
+{
+
+
+	def title = "FOX SPORTS CENTRAL UPDATE"
+	def description = "FOX SPORTS CENTRAL UPDATE"
+	def keyword = "News, All Sports"
+	def context = "News"
+	def source = "FOX SPORTS CENTRAL"
+
+	def imageThumb = "http://devapps.foxsportsasia.com/img-fsp/FSCWEB.jpg"
+
+	ingestMediaObject.title = title
+	ingestMediaObject.description = description
+	ingestMediaObject.keywords = keyword
+	ingestMediaObject.setCustomValue(null, "Context", context);
+	ingestMediaObject.setCustomValue(null, "Source", source);
+	ingestMediaObject.setCustomValue(null, "isLive", false);
+	ingestMediaObject.setCustomValue(null, "isFree", true);
+
+
+	def fileNameSplitArray = mediaName.split("FSCWEB")
+
+	def endname = fileNameSplitArray[1]
+
+	def finalDate = endname + " 5:00 PM"
+	SimpleDateFormat pdf = new SimpleDateFormat("ddMMyyyy hh:mm a z");
+	def date = pdf.parse(finalDate+" SGT")
+	ingestMediaObject.availableDate  = date
+	use ( TimeCategory ) {
+		ingestMediaObject.expirationDate= date + 24.hours
+	}
+
+	def ingestMediaThumbnailFiles = []
+
+
+
+	IngestMediaFile mediaFileThumb = new IngestMediaFile()
+	TransferInfo transferInfo = new TransferInfo()
+	transferInfo.supportsStreaming = true
+	IngestOptions ingestOptions = new IngestOptions()
+	ingestOptions.method = IngestMethod.Link
+	mediaFileThumb.sourceUrl = imageThumb
+	mediaFileThumb.assetTypes = ["Mezzanine Image"]
+	mediaFileThumb.transferInfo = transferInfo
+	mediaFileThumb.ingestOptions = ingestOptions
+	ingestMediaThumbnailFiles << mediaFileThumb
+
+	ingestMediaObject.setThumbnails(ingestMediaThumbnailFiles.toArray(new IngestMediaFile[ingestMediaThumbnailFiles.size()]))
+
+
+	// Enable Auto Publish Option
+
+	// Create a WorkflowOption for an individual media item
+	WorkflowOption wkflwOpt = new WorkflowOption()
+
+	// Set the options for the publish action
+	wkflwOpt.setService("publish")
+	wkflwOpt.setMethod("publish")
+
+	// The profile argument tells the publish service
+	// which publish profile to use with this media.
+
+
+	Map<String, String> argMap = new HashMap<String, String>()
+	argMap.put("profile", "PROD - Mobile Feed")
+
+	wkflwOpt.setArguments(argMap)
+
+
+
+	// Create a WorkflowOption for an individual media item
+	WorkflowOption wkflwOpt1 = new WorkflowOption()
+
+	// Set the options for the publish action
+	wkflwOpt1.setService("publish")
+	wkflwOpt1.setMethod("publish")
+
+
+	Map<String, String> argMap1 = new HashMap<String, String>()
+	argMap1.put("profile", "PROD - Website Feed")
+
+	wkflwOpt1.setArguments(argMap1)
+
+	WorkflowOption wkflwOpt2 = new WorkflowOption()
+
+	// Set the options for the publish action
+	wkflwOpt2.setService("publish")
+	wkflwOpt2.setMethod("publish")
+
+	Map<String, String> argMap2 = new HashMap<String, String>()
+	argMap2.put("profile", "PROD - PCCW VOD")
+
+	wkflwOpt2.setArguments(argMap2)
+
+
+	// Assign the workflow request to the media.
+	def woArr = new WorkflowOption[3]
+	woArr[0] = wkflwOpt
+	woArr[1] = wkflwOpt1
+	woArr[2] = wkflwOpt2
+	ingestMediaObject.setWorkflowOptions(woArr)
+
+
+
+
+}
